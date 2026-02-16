@@ -12,7 +12,8 @@ class BacktestEngine:
     def __init__(self, symbol='BTC/USDT', timeframe='1h', initial_equity=10000):
         self.symbol = symbol
         self.timeframe = timeframe
-        self.exchange = ccxt.binance()
+        # FIX: Enable rate limit to prevent empty data returns
+        self.exchange = ccxt.binance({'enableRateLimit': True}) 
         self.initial_equity = initial_equity
         self.equity = initial_equity
         self.df = pd.DataFrame()
@@ -36,11 +37,19 @@ class BacktestEngine:
         all_candles = []
         
         while since < self.exchange.milliseconds():
-            candles = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, since=since, limit=1000)
-            if not candles: break
-            since = candles[-1][0] + 1
-            all_candles.extend(candles)
+            try:
+                candles = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, since=since, limit=1000)
+                if not candles: break
+                since = candles[-1][0] + 1
+                all_candles.extend(candles)
+            except Exception as e:
+                print(f"Fetch Error: {e}")
+                break
             
+        if not all_candles:
+            print("Warning: No data fetched.")
+            return pd.DataFrame()
+
         new_df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
         new_df.set_index('timestamp', inplace=True)
@@ -88,11 +97,12 @@ class BacktestEngine:
 
     def run(self):
         """Iterates through data to simulate trades."""
-        # FIX: Removed self.load_data() from here. 
-        # It relies on the strategy or initialization to have loaded/prepared data.
-        
         if self.df.empty:
             self.load_data()
+            
+        if self.df.empty:
+            print("No data to run backtest.")
+            return
 
         self.trades = []
         self.equity = self.initial_equity
@@ -120,6 +130,7 @@ class BacktestEngine:
                     })
                     self.position = 0
             
+            # Update Equity Curve (Mark to Market)
             if self.position != 0:
                 curr_pnl_pct = (row['close'] - self.entry_price) / self.entry_price
                 if self.position == -1: curr_pnl_pct *= -1
@@ -129,6 +140,7 @@ class BacktestEngine:
             
             self.equity_curve.append({'time': timestamp, 'equity': current_equity})
             
+            # Entry Logic
             if self.position == 0:
                 sig = self.strategy(row)
                 if sig != 0:

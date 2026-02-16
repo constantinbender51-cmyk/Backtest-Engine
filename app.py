@@ -21,6 +21,11 @@ def live_runner():
     global live_status
     while True:
         try:
+            # Ensure we have data before trying to access it
+            if bot.df.empty:
+                time.sleep(5)
+                continue
+
             latest = bot.exchange.fetch_ohlcv(bot.symbol, bot.timeframe, limit=5)
             last_candle = latest[-2] 
             last_closed_time = pd.to_datetime(last_candle[0], unit='ms')
@@ -34,24 +39,27 @@ def live_runner():
                     'low': last_candle[3], 'close': last_candle[4], 
                     'volume': last_candle[5]
                 }], index=[last_closed_time])
-                bot.df = pd.concat([bot.df, new_row])
                 
-                # Update Indicators & Signals
-                bot.prepare_indicators()
-                row = bot.df.iloc[-1]
-                
-                # Check Exits
-                if bot.position != 0:
-                    is_exit, _, _ = bot.check_exit(row)
-                    if is_exit: bot.position = 0
-                
-                # Check Entries
-                if bot.position == 0:
-                    sig = bot.strategy(row)
-                    if sig != 0:
-                        bot.position = sig
-                        bot.entry_price = row['close']
-                        bot.entry_time = last_closed_time
+                # Check for duplicate index before appending
+                if last_closed_time not in bot.df.index:
+                    bot.df = pd.concat([bot.df, new_row])
+                    
+                    # Update Indicators & Signals
+                    bot.prepare_indicators()
+                    row = bot.df.iloc[-1]
+                    
+                    # Check Exits
+                    if bot.position != 0:
+                        is_exit, _, _ = bot.check_exit(row)
+                        if is_exit: bot.position = 0
+                    
+                    # Check Entries
+                    if bot.position == 0:
+                        sig = bot.strategy(row)
+                        if sig != 0:
+                            bot.position = sig
+                            bot.entry_price = row['close']
+                            bot.entry_time = last_closed_time
             else:
                 live_status = f"Live: {latest[-1][4]} | Pos: {bot.position}"
 
@@ -71,16 +79,30 @@ def index():
 
 @app.route('/data')
 def data():
-    # Plots
+    # FIX: Check if dataframe is empty to prevent crashes
+    if bot.df.empty:
+        return jsonify({'error': 'No data yet'})
+
+    # FIX: Convert index to string for valid JSON serialization
     price_fig = go.Figure(data=[go.Candlestick(
-        x=bot.df.index,
+        x=bot.df.index.astype(str),
         open=bot.df['open'], high=bot.df['high'],
         low=bot.df['low'], close=bot.df['close']
     )])
     price_fig.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=0, b=0), height=300)
 
     equity_df = pd.DataFrame(bot.equity_curve)
-    equity_fig = go.Figure(data=[go.Scatter(x=equity_df['time'], y=equity_df['equity'], line=dict(color='#00ff00'))])
+    
+    # FIX: Convert time column to string if it exists
+    if not equity_df.empty:
+        equity_fig = go.Figure(data=[go.Scatter(
+            x=equity_df['time'].astype(str), 
+            y=equity_df['equity'], 
+            line=dict(color='#00ff00')
+        )])
+    else:
+        equity_fig = go.Figure()
+
     equity_fig.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=0, b=0), height=200)
 
     return jsonify({

@@ -22,13 +22,12 @@ class BacktestEngine:
         # Risk Management Defaults
         self.sl_pct = 0.02
         self.tp_pct = 0.04
-        self.trailing_sl_pct = None # Set to 0.0X to enable
+        self.trailing_sl_pct = None
 
         # State
-        self.position = 0 # 1 (Long), -1 (Short), 0 (Flat)
+        self.position = 0
         self.entry_price = 0.0
         self.entry_time = None
-        self.highest_price = 0.0 # For trailing stop
 
     def fetch_data(self, days=30):
         """Fetches OHLC data from Binance and saves to disk."""
@@ -42,7 +41,6 @@ class BacktestEngine:
             since = candles[-1][0] + 1
             all_candles.extend(candles)
             
-        # Deduplicate and Save
         new_df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
         new_df.set_index('timestamp', inplace=True)
@@ -61,38 +59,27 @@ class BacktestEngine:
             self.fetch_data()
 
     def strategy(self, row):
-        """User overrides this method. Returns 1, -1, or 0."""
         return 0
 
     def check_exit(self, row):
-        """Checks High/Low for SL/TP hits before Close."""
         if self.position == 0: return False, 0, 0
-
-        price = row['close']
-        pnl_pct = 0
-        exit_price = price
-        reason = None
 
         # Long Logic
         if self.position == 1:
-            # Check Stop Loss (Low)
             sl_price = self.entry_price * (1 - self.sl_pct)
             if row['low'] <= sl_price:
                 return True, sl_price, -self.sl_pct
             
-            # Check Take Profit (High)
             tp_price = self.entry_price * (1 + self.tp_pct)
             if row['high'] >= tp_price:
                 return True, tp_price, self.tp_pct
                 
         # Short Logic
         elif self.position == -1:
-            # Check Stop Loss (High)
             sl_price = self.entry_price * (1 + self.sl_pct)
             if row['high'] >= sl_price:
                 return True, sl_price, -self.sl_pct
                 
-            # Check Take Profit (Low)
             tp_price = self.entry_price * (1 - self.tp_pct)
             if row['low'] <= tp_price:
                 return True, tp_price, self.tp_pct
@@ -101,7 +88,12 @@ class BacktestEngine:
 
     def run(self):
         """Iterates through data to simulate trades."""
-        self.load_data()
+        # FIX: Removed self.load_data() from here. 
+        # It relies on the strategy or initialization to have loaded/prepared data.
+        
+        if self.df.empty:
+            self.load_data()
+
         self.trades = []
         self.equity = self.initial_equity
         self.equity_curve = [{'time': self.df.index[0], 'equity': self.equity}]
@@ -112,7 +104,6 @@ class BacktestEngine:
             row = self.df.iloc[i]
             timestamp = self.df.index[i]
 
-            # 1. Check Stops/Exits on EXISTING position using current candle High/Low
             if self.position != 0:
                 is_exit, exit_price, pnl_pct = self.check_exit(row)
                 if is_exit:
@@ -129,7 +120,6 @@ class BacktestEngine:
                     })
                     self.position = 0
             
-            # 2. Update Equity Curve (Mark to Market for visualization)
             if self.position != 0:
                 curr_pnl_pct = (row['close'] - self.entry_price) / self.entry_price
                 if self.position == -1: curr_pnl_pct *= -1
@@ -138,11 +128,6 @@ class BacktestEngine:
                 current_equity = self.equity
             
             self.equity_curve.append({'time': timestamp, 'equity': current_equity})
-
-            # 3. Calculate Signal for NEXT candle (based on Close)
-            # We don't trade on the same candle we get the signal unless we use Open
-            # Standard backtest: Signal at Close -> Open next candle. 
-            # Simplified here: Enter at Close of signal candle.
             
             if self.position == 0:
                 sig = self.strategy(row)
@@ -165,5 +150,4 @@ class BacktestEngine:
             'Win Rate': f"{round(len(wins)/len(df_trades)*100, 1)}%",
             'Avg Win': round(wins['pnl'].mean(), 2) if not wins.empty else 0,
             'Avg Loss': round(losses['pnl'].mean(), 2) if not losses.empty else 0,
-            'Max Drawdown': 'N/A (To Implement)'
         }

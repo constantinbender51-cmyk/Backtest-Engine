@@ -59,28 +59,41 @@
 
 <script>
     async function updateData() {
-        const res = await fetch('/data');
-        const data = await res.json();
-        
-        document.getElementById('status').innerText = data.live_status;
-        document.getElementById('netProfit').innerText = '$' + data.stats['Net Profit'];
-        document.getElementById('winRate').innerText = data.stats['Win Rate'];
+        try {
+            const res = await fetch('/data');
+            const data = await res.json();
+            
+            document.getElementById('status').innerText = data.live_status;
+            document.getElementById('netProfit').innerText = '$' + data.stats['Net Profit'];
+            document.getElementById('winRate').innerText = data.stats['Win Rate'];
 
-        const tbody = document.getElementById('tradeTable');
-        tbody.innerHTML = '';
-        data.trades.slice(0, 15).forEach(t => {
-            const color = t.pnl >= 0 ? 'text-success' : 'text-danger';
-            const row = `
-                <tr>
-                    <td><span class="badge ${t.type==='Long'?'bg-success':'bg-danger'}">${t.type}</span></td>
-                    <td>${t.price_in.toFixed(0)} -> ${t.price_out.toFixed(0)}</td>
-                    <td class="text-end ${color}">$${t.pnl.toFixed(2)}</td>
-                </tr>`;
-            tbody.innerHTML += row;
-        });
+            // FORCE IMAGE REFRESH
+            // We append a timestamp to the URL so the browser thinks it's a new image
+            const chartImg = document.querySelector('img');
+            chartImg.src = `/chart?t=${new Date().getTime()}`;
+
+            const tbody = document.getElementById('tradeTable');
+            tbody.innerHTML = '';
+            data.trades.slice(0, 15).forEach(t => {
+                const color = t.pnl >= 0 ? 'text-success' : 'text-danger';
+                const row = `
+                    <tr>
+                        <td><span class="badge ${t.type==='Long'?'bg-success':'bg-danger'}">${t.type}</span></td>
+                        <td>${t.price_in.toFixed(0)} -> ${t.price_out.toFixed(0)}</td>
+                        <td class="text-end ${color}">$${t.pnl.toFixed(2)}</td>
+                    </tr>`;
+                tbody.innerHTML += row;
+            });
+        } catch (e) {
+            console.log("Connection lost", e);
+        }
     }
+    
+    // Refresh every 5 seconds
+    setInterval(updateData, 5000);
     updateData();
 </script>
+
 
 </body>
 </html>

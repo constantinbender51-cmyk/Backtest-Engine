@@ -182,3 +182,25 @@ class BacktestEngine:
         ax1.scatter(long_entries, long_entry_prices, marker='^', color='green', s=100, label='Buy', zorder=5)
 
         short_entries = [t['entry_time'] for t in self.trades if t['type'] == 'Short']
+        short_entry_prices = [t['price_in'] for t in self.trades if t['type'] == 'Short']
+        ax1.scatter(short_entries, short_entry_prices, marker='v', color='red', s=100, label='Sell', zorder=5)
+
+        ax1.set_title(f"{self.symbol} Strategy Performance")
+        ax1.set_ylabel("Price")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Plot 2: Equity
+        ax2.plot(equity_df.index, equity_df['equity'], color='green', linewidth=2)
+        ax2.fill_between(equity_df.index, equity_df['equity'], self.initial_equity, alpha=0.1, color='green')
+        ax2.set_ylabel("Equity ($)")
+        ax2.grid(True, alpha=0.3)
+
+        # Format Date
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        plt.xticks(rotation=45)
+        
+        plt.tight_layout()
+        plt.savefig(filename)
+        plt.close()
+        print(f"--> Chart saved to {filename}")

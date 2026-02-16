@@ -1,41 +1,41 @@
 from engine import BacktestEngine
+import pandas as pd
 
-class MeanReversionStrategy(BacktestEngine):
+class Strategy(BacktestEngine):
     def __init__(self):
-        super().__init__(symbol='ETH/USDT', timeframe='1h')
-        self.sl_pct = 0.02
-        self.tp_pct = 0.06
-        
-        # Strategy specific variables
-        self.window = 20
-
-    def strategy(self, row):
-        """
-        Input: row (pandas Series with open, high, low, close, volume)
-        Output: 1 (Buy), -1 (Sell), 0 (Hold)
-        """
-        # We need historical context, so we look at self.df up to this timestamp
-        # Note: In a loop, this is slow. For production, pre-calculate indicators in 'run'
-        
-        # Simplified "Vectorized" approach:
-        # We pre-calculate indicators once in run() for speed, then access them here.
-        # But for this specific simplistic request, we access the row's pre-calc columns.
-        
-        if row['rsi'] < 30:
-            return 1 # Long
-        elif row['rsi'] > 70:
-            return -1 # Short
-        return 0
+        # We hardcode the settings for the one strategy we want to run
+        super().__init__(symbol='BTC/USDT', timeframe='4h')
+        self.sl_pct = 0.05
+        self.tp_pct = 0.15
+        self.fast_window = 50
+        self.slow_window = 200
 
     def prepare_indicators(self):
-        """Helper to add indicators before loop."""
-        delta = self.df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        self.df['rsi'] = 100 - (100 / (1 + rs))
+        self.df['sma_fast'] = self.df['close'].rolling(window=self.fast_window).mean()
+        self.df['sma_slow'] = self.df['close'].rolling(window=self.slow_window).mean()
+
+    def strategy(self, row):
+        if pd.isna(row['sma_slow']): return 0
+        if row['sma_fast'] > row['sma_slow']: return 1
+        elif row['sma_fast'] < row['sma_slow']: return -1
+        return 0
+
+    def check_exit(self, row):
+        # 1. Standard TP/SL
+        is_exit, price, pnl = super().check_exit(row)
+        if is_exit: return True, price, pnl
+        
+        # 2. Trend Reversal Exit (SMA Cross back)
+        if self.position == 1 and row['sma_fast'] < row['sma_slow']:
+            return True, row['close'], (row['close'] - self.entry_price) / self.entry_price
+            
+        if self.position == -1 and row['sma_fast'] > row['sma_slow']:
+            return True, row['close'], (self.entry_price - row['close']) / self.entry_price
+            
+        return False, 0, 0
 
     def run(self):
-        self.load_data()
-        self.prepare_indicators() # Pre-calc logic
-        super().run() # Run the loop
+        # Self-managed data fetching
+        self.fetch_data(days=365)
+        self.prepare_indicators()
+        super().run()
